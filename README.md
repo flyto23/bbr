@@ -1,13 +1,25 @@
-# BBR v3 优化脚本 - Ultimate Edition v5.5.0
-XanMod 内核 + BBR v3 + VPS 网络调优
+# BBR v3 优化脚本 - Ultimate Edition v5.6.0
+
+**XanMod 内核 + BBR v3 + VPS 网络调优**
+
+一键安装 XanMod 内核，启用 BBR v3 拥塞控制，并提供内核/网络/反向代理/脚本维护等 12 项功能，专注把 VPS 的 TCP 吞吐和稳定性调好。
+
+> **v5.6.0**：新增 **98. 更新脚本**，可直接从 `https://github.com/flyto23/bbr` 拉取最新版并安装到 `/usr/local/bin/net-tcp-tune.sh`；移除临时 SOCKS5 代理、虚拟内存管理、查看系统详细状态（原 9-11），一键反代改为 9。
+
 ---
 
 ## 一键安装
 
+**如果是新机器（未安装 curl），请先手动执行：**
+
+```bash
+apt update -y && apt install curl -y
+```
+
 **安装脚本（安装后只需输入 `bbr` 即可运行）：**
 
 ```bash
-# 安装别名
+# 安装：下载脚本到 /usr/local/bin 并写入 bbr 快捷命令
 bash <(curl -q -fsSL "https://raw.githubusercontent.com/flyto23/bbr/main/install-alias.sh?$(date +%s)")
 
 # 重新加载配置
@@ -17,6 +29,30 @@ source ~/.bashrc  # 或 source ~/.zshrc
 bbr
 ```
 
+**说明**：
+
+- 脚本会下载到 `/usr/local/bin/net-tcp-tune.sh`，`bbr` 直接运行本地副本（启动快、不依赖网络）
+- 下载或校验失败时自动退回“在线模式”（每次运行从 GitHub 拉取）
+- 后续更新：运行 `bbr` → 选择 **98. 更新脚本**
+
+<details>
+<summary>其他安装方式（点击展开）</summary>
+
+### 方式2：在线运行（临时使用，不落盘）
+
+```bash
+bash <(curl -q -fsSL "https://raw.githubusercontent.com/flyto23/bbr/main/net-tcp-tune.sh?$(date +%s)")
+```
+
+### 方式3：下载到本地
+
+```bash
+wget -O net-tcp-tune.sh "https://raw.githubusercontent.com/flyto23/bbr/main/net-tcp-tune.sh?$(date +%s)"
+chmod +x net-tcp-tune.sh
+./net-tcp-tune.sh
+```
+
+> 本地下载的脚本不会自动更新；需要新版时重新执行 `wget`，或在菜单里选择 98 更新。
 
 </details>
 
@@ -56,7 +92,7 @@ bbr
 
 ## 功能菜单概览
 
-本脚本包含 **13** 项功能，专注内核与网络优化。
+本脚本包含 **12** 项功能，专注内核与网络优化。
 
 ### 核心功能
 
@@ -80,15 +116,12 @@ bbr
 | :--: | --------------------- | ------------------------------ |
 |  7   | 设置 IPv4/IPv6 优先级 | 解决 Google 验证码跳验证等问题 |
 |  8   | IPv6 管理             | 临时/永久禁用或恢复 IPv6       |
-|  9   | 设置临时 SOCKS5 代理  | 终端临时走代理，支持认证       |
-|  10  | 虚拟内存管理          | 智能计算并添加 Swap，防止 OOM  |
-|  11  | 查看系统详细状态      | CPU/内存/磁盘/网络/内核信息    |
 
 ### 代理部署
 
-| 编号 | 功能名称     | 说明                                |
-| :--: | ------------ | ----------------------------------- |
-|  12  | **一键反代** | 推荐，Cloudflare Tunnel 内网穿透    |
+| 编号 | 功能名称     | 说明                             |
+| :--: | ------------ | -------------------------------- |
+|  9   | **一键反代** | 推荐，Cloudflare Tunnel 内网穿透 |
 
 ### 一键优化
 
@@ -96,12 +129,13 @@ bbr
 | :--: | ----------------------------------------- | ------------------------------ |
 |  66  | **⭐ 一键全自动优化 (BBR v3 + 网络调优)** | 推荐，两阶段自动执行 1→3→5→6→8 |
 
-### 其他
+### 脚本维护
 
-| 编号 | 功能名称                     | 说明                 |
-| :--: | ---------------------------- | -------------------- |
-|  99  | 完全卸载脚本（卸载所有内容） | 清理脚本产生的全部配置 |
-|  0   | 退出脚本                     |                      |
+| 编号 | 功能名称                          | 说明                                   |
+| :--: | --------------------------------- | -------------------------------------- |
+|  98  | **更新脚本（从 GitHub 拉取最新版）** | 推荐，自动校验版本、备份旧版并可立即重启 |
+|  99  | 完全卸载脚本（卸载所有内容）      | 清理脚本产生的全部配置和本地副本       |
+|  0   | 退出脚本                          |                                        |
 
 ---
 
@@ -118,7 +152,7 @@ bbr
 - 缓冲区按内存自动封顶并设置 `tcp_mem`；长距离线路连接起步更快（实测前 3 秒提速约 60%）
 - 本内核不支持的参数自动跳过；多队列网卡逐队列启用 fq；已有端口限速或 CAKE 时不覆盖
 
-### 2. 一键反代 (功能 12)
+### 2. 一键反代 (功能 9)
 
 基于 Cloudflare Tunnel 的内网穿透，无需开放 VPS 80/443 端口，自动 HTTPS：
 
@@ -142,4 +176,70 @@ bbr
 3. Realm 转发修复
 4. 禁用 IPv6（可选；纯 IPv6 机器会自动跳过，避免断 SSH）
 
+### 4. 在线更新 (功能 98)
+
+- 从 `https://github.com/flyto23/bbr` 的 `main` 分支拉取最新 `net-tcp-tune.sh`
+- 下载后依次校验：非 HTML/错误页、shebang、脚本标记、`bash -n` 语法
+- 校验通过才替换 `/usr/local/bin/net-tcp-tune.sh`，旧版本自动备份为 `.bak.时间戳`
+- 自动把 `bbr` 别名指向本地副本，可选择立即以新版本重启
+- 任一步失败都不会破坏现有脚本
+
 ---
+
+## 常见问题
+
+**Q: 安装后运行 `bbr` 提示找不到命令？**
+
+A: 请执行 `source ~/.bashrc` 重新加载配置，或者断开 SSH 重连即可。
+
+**Q: 运行 `bbr` 提示 `curl: (22) The requested URL returned error: 401`？**
+
+A: 通常是该机器旧别名或本机 `~/.curlrc` 带了异常 Authorization。请重新安装：
+
+```bash
+unalias bbr 2>/dev/null || true
+unset -f bbr 2>/dev/null || true
+bash <(curl -q -fsSL "https://raw.githubusercontent.com/flyto23/bbr/main/install-alias.sh?$(date +%s)")
+source ~/.bashrc
+```
+
+**Q: 怎么更新脚本？**
+
+A: 运行 `bbr`，选择 **98. 更新脚本**。也可以重新执行一键安装命令覆盖安装。
+
+**Q: 我的 VPS 是 ARM64（aarch64），能装 BBR v3 吗？**
+
+A: 目前不能，这不是脚本的限制。BBR v3 至今未合入 Linux 主线内核，必须使用打过补丁重新编译的内核，而 XanMod 官方只提供 x86-64 构建，ARM 平台没有官方方案。**但 ARM 机器请直接使用功能 3**：ARM 内核自带 BBR + fq 队列算法，功能 3 的带宽检测与缓冲区调优在 ARM 上原生可用，同样能获得明显提升。功能 1 在 ARM 上会直接提示这一点。
+
+**Q: 开启 BBR v3 需要重启吗？**
+
+A: 是的，首次安装内核后必须重启服务器。后续修改参数（如功能 3）通常无需重启。
+
+---
+
+## 进阶说明
+
+<details>
+<summary>开机启动恢复（点击展开）</summary>
+
+- 运行 `bbr` 时会识别本项目安装的 DNS 净化配置，自动补齐开机启动恢复；空机器浏览菜单、`--help`、`--version` 不会触发
+- 自动补齐不下载或升级程序、不更换内核、不重启机器或网卡，也不会拉起你手动停止的服务
+- 需要手动检查补齐时执行 `bbr --repair-boot-recovery`（本地文件：`bash /usr/local/bin/net-tcp-tune.sh --repair-boot-recovery`）
+- 永久禁用 IPv6 前，若网卡配置（ifupdown）里仍有 `inet6`，脚本会拒绝执行，不会代改网卡配置
+- 首次部署或迁移后，建议检查服务日志并实际测试，进程显示 `active` 不代表业务一定正常
+
+</details>
+
+---
+
+## 支持项目
+
+如果这个脚本对你有帮助，欢迎 Star！
+
+[![GitHub stars](https://img.shields.io/github/stars/flyto23/bbr?style=social)](https://github.com/flyto23/bbr)
+
+## Star History
+
+<a href="https://star-history.com/#flyto23/bbr&Date">
+  <img src="https://api.star-history.com/svg?repos=flyto23/bbr&type=Date" alt="Star History Chart" width="600">
+</a>

@@ -8,14 +8,14 @@
 # 1. 正式版本迭代时修改 SCRIPT_VERSION，并更新版本备注（保留最新5条）
 # 2. 临时热修/不发版时只修改 SCRIPT_LAST_UPDATE，用于快速识别脚本是否已更新
 #=============================================================================
+# v5.6.0 更新: 新增菜单 98「更新脚本」，从 flyto23/bbr 拉取最新版并安装到 /usr/local/bin；移除临时SOCKS5代理、虚拟内存管理、查看系统详细状态(原9-11)，一键反代改为 9 (by Eric86777)
 # v5.5.0 更新: 精简版：移除代理部署(原12-16)、IP/网络检测与第三方工具(原18-33)，仅保留内核/BBR优化/系统配置/一键反代/一键优化，菜单重新编号（一键优化保留 66 快捷入口） (by Eric86777)
 # v5.4.22 更新: 纯IPv6机器保护(一键优化跳过禁用IPv6、Realm修复保留原监听)；cloudflared安装先下载到临时文件验证后再替换；Caddy安装按CPU架构选择下载包并在临时目录验证后安装 (by Eric86777)
 # v5.4.21 更新: 修复旧版官方安装(无xray账号、服务以nobody运行、日志属nobody)的Xray卸载被“专用 xray 账号不存在”拦住 (by Eric86777)
 # v5.4.20 更新: 功能3提速与修复：tcp_notsent_lowat恢复内核默认(长距离起步提速)；缓冲区按内存封顶并设置tcp_mem；tcp_rmem起步值改回131072；内核不支持的参数自动注释；多队列网卡保留mq (by Eric86777)
-# v5.4.19 更新: Xray安装/更新可选版本：默认稳定版v26.3.27，可选官方最新版并提示客户端要求、需确认；已装更新版本时默认保持，可降回稳定版 (by Eric86777)
 
-SCRIPT_VERSION="5.5.0"
-SCRIPT_LAST_UPDATE="精简菜单（移除代理部署/检测/第三方工具）"
+SCRIPT_VERSION="5.6.0"
+SCRIPT_LAST_UPDATE="新增在线更新，移除临时代理/虚拟内存/详细状态"
 #=============================================================================
 
 #=============================================================================
@@ -98,6 +98,11 @@ format_fixed_width() {
 
 # GitHub 代理设置
 gh_proxy="https://"
+
+# 脚本仓库地址与本地安装路径（菜单 98 在线更新使用）
+SCRIPT_REPO_URL="https://github.com/flyto23/bbr"
+SCRIPT_RAW_BASE="https://raw.githubusercontent.com/flyto23/bbr/refs/heads/main"
+SCRIPT_LOCAL_PATH="/usr/local/bin/net-tcp-tune.sh"
 
 # 配置文件路径（使用独立文件，不破坏系统配置）
 # sysctl.d 下的文件按文件名顺序加载，同名参数后加载者生效。旧文件名 99-bbr-ultimate.conf
@@ -422,213 +427,6 @@ check_disk_space() {
     fi
 }
 
-check_swap() {
-    local swap_total=$(free -m | awk 'NR==3{print $2}')
-
-    if [ "$swap_total" -eq 0 ]; then
-        echo -e "${gl_huang}检测到无虚拟内存，正在创建 1G SWAP...${gl_bai}"
-        if fallocate -l $((1025 * 1024 * 1024)) /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=1025 2>/dev/null; then
-            chmod 600 /swapfile
-            mkswap /swapfile > /dev/null 2>&1
-            if swapon /swapfile 2>/dev/null; then
-                # 防止重复写入 fstab
-                if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
-                    echo '/swapfile none swap sw 0 0' >> /etc/fstab
-                fi
-                echo -e "${gl_lv}虚拟内存创建成功${gl_bai}"
-            else
-                echo -e "${gl_huang}⚠️  SWAP 激活失败，但不影响安装${gl_bai}"
-            fi
-        else
-            echo -e "${gl_huang}⚠️  SWAP 文件创建失败，但不影响安装${gl_bai}"
-        fi
-    fi
-}
-
-add_swap() {
-    local new_swap=$1  # 获取传入的参数（单位：MB）
-
-    echo -e "${gl_kjlan}=== 调整虚拟内存（仅管理 /swapfile） ===${gl_bai}"
-
-    # 检测是否存在活跃的 /dev/* swap 分区
-    local dev_swap_list
-    dev_swap_list=$(awk 'NR>1 && $1 ~ /^\/dev\// {printf "  • %s (大小: %d MB, 已用: %d MB)\n", $1, int(($3+512)/1024), int(($4+512)/1024)}' /proc/swaps)
-
-    if [ -n "$dev_swap_list" ]; then
-        echo -e "${gl_huang}检测到以下 /dev/ 虚拟内存处于激活状态：${gl_bai}"
-        echo "$dev_swap_list"
-        echo ""
-        echo -e "${gl_huang}提示:${gl_bai} 本脚本不会修改 /dev/ 分区，请使用 ${gl_zi}swapoff <设备>${gl_bai} 等命令手动处理。"
-        echo ""
-    fi
-
-    # 确保 /swapfile 不再被使用
-    swapoff /swapfile 2>/dev/null
-    
-    # 删除旧的 /swapfile
-    rm -f /swapfile
-    
-    echo "正在创建 ${new_swap}MB 虚拟内存..."
-    
-    # 创建新的 swap 分区
-    fallocate -l $(( (new_swap + 1) * 1024 * 1024 )) /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$((new_swap + 1))
-    chmod 600 /swapfile
-    mkswap /swapfile > /dev/null 2>&1
-    swapon /swapfile
-    
-    # 更新 /etc/fstab
-    sed -i '/\/swapfile/d' /etc/fstab
-    echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
-    
-    # Alpine Linux 特殊处理
-    if [ -f /etc/alpine-release ]; then
-        echo "nohup swapon /swapfile" > /etc/local.d/swap.start
-        chmod +x /etc/local.d/swap.start
-        rc-update add local 2>/dev/null
-    fi
-    
-    echo -e "${gl_lv}虚拟内存大小已调整为 ${new_swap}MB${gl_bai}"
-}
-
-calculate_optimal_swap() {
-    # 获取物理内存（MB）
-    local mem_total=$(free -m | awk 'NR==2{print $2}')
-    local recommended_swap
-    local reason
-    
-    echo -e "${gl_kjlan}=== 智能计算虚拟内存大小 ===${gl_bai}"
-    echo ""
-    echo -e "检测到物理内存: ${gl_huang}${mem_total}MB${gl_bai}"
-    echo ""
-    echo "计算过程："
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
-    # 根据内存大小计算推荐 SWAP
-    if [ "$mem_total" -lt 512 ]; then
-        # < 512MB: SWAP = 1GB（固定）
-        recommended_swap=1024
-        reason="内存极小（< 512MB），固定推荐 1GB"
-        echo "→ 内存 < 512MB"
-        echo "→ 推荐固定 1GB SWAP"
-        
-    elif [ "$mem_total" -lt 1024 ]; then
-        # 512MB ~ 1GB: SWAP = 内存 × 2
-        recommended_swap=$((mem_total * 2))
-        reason="内存较小（512MB-1GB），推荐 2 倍内存"
-        echo "→ 内存在 512MB - 1GB 之间"
-        echo "→ 计算公式: SWAP = 内存 × 2"
-        echo "→ ${mem_total}MB × 2 = ${recommended_swap}MB"
-        
-    elif [ "$mem_total" -lt 2048 ]; then
-        # 1GB ~ 2GB: SWAP = 内存 × 1.5
-        recommended_swap=$((mem_total * 3 / 2))
-        reason="内存适中（1-2GB），推荐 1.5 倍内存"
-        echo "→ 内存在 1GB - 2GB 之间"
-        echo "→ 计算公式: SWAP = 内存 × 1.5"
-        echo "→ ${mem_total}MB × 1.5 = ${recommended_swap}MB"
-        
-    elif [ "$mem_total" -lt 4096 ]; then
-        # 2GB ~ 4GB: SWAP = 内存 × 1
-        recommended_swap=$mem_total
-        reason="内存充足（2-4GB），推荐与内存同大小"
-        echo "→ 内存在 2GB - 4GB 之间"
-        echo "→ 计算公式: SWAP = 内存 × 1"
-        echo "→ ${mem_total}MB × 1 = ${recommended_swap}MB"
-        
-    elif [ "$mem_total" -lt 8192 ]; then
-        # 4GB ~ 8GB: SWAP = 4GB（固定）
-        recommended_swap=4096
-        reason="内存较多（4-8GB），固定推荐 4GB"
-        echo "→ 内存在 4GB - 8GB 之间"
-        echo "→ 固定推荐 4GB SWAP"
-        
-    else
-        # >= 8GB: SWAP = 4GB（固定）
-        recommended_swap=4096
-        reason="内存充裕（≥ 8GB），固定推荐 4GB"
-        echo "→ 内存 ≥ 8GB"
-        echo "→ 固定推荐 4GB SWAP"
-    fi
-    
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo -e "${gl_lv}计算结果：${gl_bai}"
-    echo -e "  物理内存:   ${gl_huang}${mem_total}MB${gl_bai}"
-    echo -e "  推荐 SWAP:  ${gl_huang}${recommended_swap}MB${gl_bai}"
-    echo -e "  总可用内存: ${gl_huang}$((mem_total + recommended_swap))MB${gl_bai}"
-    echo ""
-    echo -e "${gl_zi}推荐理由: ${reason}${gl_bai}"
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
-    # 确认是否应用
-    read -e -p "$(echo -e "${gl_huang}是否应用此配置？(Y/N): ${gl_bai}")" confirm
-    
-    case "$confirm" in
-        [Yy])
-            add_swap "$recommended_swap"
-            return 0
-            ;;
-        *)
-            echo "已取消"
-            sleep 2
-            return 1
-            ;;
-    esac
-}
-
-manage_swap() {
-    while true; do
-        clear
-        echo -e "${gl_kjlan}=== 虚拟内存管理（仅限 /swapfile） ===${gl_bai}"
-        echo -e "${gl_huang}提示:${gl_bai} 如需调整 /dev/ swap 分区，请手动执行 swapoff/swap 分区工具。"
-
-        local mem_total=$(free -m | awk 'NR==2{print $2}')
-        local swap_total=$(free -m | awk 'NR==3{print $2}')
-        local swap_info=$(free -m | awk 'NR==3{used=$3; total=$2; if (total == 0) {percentage=0} else {percentage=used*100/total}; printf "%dM/%dM (%d%%)", used, total, percentage}')
-        
-        echo -e "物理内存:     ${gl_huang}${mem_total}MB${gl_bai}"
-        echo -e "当前虚拟内存: ${gl_huang}$swap_info${gl_bai}"
-        echo "------------------------------------------------"
-        echo "1. 分配 1024M (1GB) - 固定配置"
-        echo "2. 分配 2048M (2GB) - 固定配置"
-        echo "3. 分配 4096M (4GB) - 固定配置"
-        echo "4. 智能计算推荐值 - 自动计算最佳配置"
-        echo "0. 返回主菜单"
-        echo "------------------------------------------------"
-        read -e -p "请输入选择: " choice
-        
-        case "$choice" in
-            1)
-                add_swap 1024
-                break_end
-                ;;
-            2)
-                add_swap 2048
-                break_end
-                ;;
-            3)
-                add_swap 4096
-                break_end
-                ;;
-            4)
-                calculate_optimal_swap
-                if [ $? -eq 0 ]; then
-                    break_end
-                fi
-                ;;
-            0)
-                return
-                ;;
-            *)
-                echo "无效选择"
-                sleep 2
-                ;;
-        esac
-    done
-}
-
 # 通用 IP 优先级设置函数
 # 参数: $1 = "ipv4" 或 "ipv6"
 set_ip_priority() {
@@ -873,154 +671,6 @@ restore_gai_conf() {
     fi
     
     echo ""
-    break_end
-}
-
-set_temp_socks5_proxy() {
-    clear
-    echo -e "${gl_kjlan}=== 设置临时SOCKS5代理 ===${gl_bai}"
-    echo ""
-    echo "此代理配置仅对当前终端会话有效，重启后自动失效"
-    echo "------------------------------------------------"
-    echo ""
-    
-    # 输入代理服务器IP
-    local proxy_ip=""
-    while true; do
-        read -e -p "$(echo -e "${gl_huang}请输入代理服务器IP: ${gl_bai}")" proxy_ip
-
-        if [ -z "$proxy_ip" ]; then
-            echo -e "${gl_hong}❌ IP地址不能为空${gl_bai}"
-        elif [[ "$proxy_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-            # 验证IP格式和范围（每段0-255）
-            local valid_ip=true
-            IFS='.' read -ra octets <<< "$proxy_ip"
-            for octet in "${octets[@]}"; do
-                if [ "$octet" -gt 255 ]; then
-                    valid_ip=false
-                    break
-                fi
-            done
-            if [ "$valid_ip" = true ]; then
-                echo -e "${gl_lv}✅ IP地址: ${proxy_ip}${gl_bai}"
-                break
-            else
-                echo -e "${gl_hong}❌ IP地址范围无效（每段必须在0-255之间）${gl_bai}"
-            fi
-        else
-            echo -e "${gl_hong}❌ 无效的IP地址格式${gl_bai}"
-        fi
-    done
-    
-    echo ""
-    
-    # 输入端口
-    local proxy_port=""
-    while true; do
-        read -e -p "$(echo -e "${gl_huang}请输入端口: ${gl_bai}")" proxy_port
-        
-        if [ -z "$proxy_port" ]; then
-            echo -e "${gl_hong}❌ 端口不能为空${gl_bai}"
-        elif [[ "$proxy_port" =~ ^[0-9]+$ ]] && [ "$proxy_port" -ge 1 ] && [ "$proxy_port" -le 65535 ]; then
-            echo -e "${gl_lv}✅ 端口: ${proxy_port}${gl_bai}"
-            break
-        else
-            echo -e "${gl_hong}❌ 无效端口，请输入 1-65535 之间的数字${gl_bai}"
-        fi
-    done
-    
-    echo ""
-    
-    # 输入用户名（可选）
-    local proxy_user=""
-    read -e -p "$(echo -e "${gl_huang}请输入用户名（留空跳过）: ${gl_bai}")" proxy_user
-    
-    if [ -n "$proxy_user" ]; then
-        echo -e "${gl_lv}✅ 用户名: ${proxy_user}${gl_bai}"
-    else
-        echo -e "${gl_zi}未设置用户名（无认证模式）${gl_bai}"
-    fi
-    
-    echo ""
-    
-    # 输入密码（可选）
-    local proxy_pass=""
-    if [ -n "$proxy_user" ]; then
-        read -e -p "$(echo -e "${gl_huang}请输入密码: ${gl_bai}")" proxy_pass
-        
-        if [ -n "$proxy_pass" ]; then
-            echo -e "${gl_lv}✅ 密码已设置${gl_bai}"
-        else
-            echo -e "${gl_huang}⚠️  密码为空${gl_bai}"
-        fi
-    fi
-    
-    # 生成代理URL
-    local proxy_url=""
-    if [ -n "$proxy_user" ] && [ -n "$proxy_pass" ]; then
-        proxy_url="socks5://${proxy_user}:${proxy_pass}@${proxy_ip}:${proxy_port}"
-    elif [ -n "$proxy_user" ]; then
-        proxy_url="socks5://${proxy_user}@${proxy_ip}:${proxy_port}"
-    else
-        proxy_url="socks5://${proxy_ip}:${proxy_port}"
-    fi
-    
-    # 生成临时配置文件（安全模式）
-    local timestamp=$(date +%Y%m%d_%H%M%S)
-    # 优先使用用户私有目录，回退到 /tmp
-    local secure_tmp="${XDG_RUNTIME_DIR:-/tmp}"
-    local config_file="${secure_tmp}/socks5_proxy_${timestamp}.sh"
-
-    # 设置安全的 umask（仅所有者可读写）
-    local old_umask=$(umask)
-    umask 077
-
-    # 生成配置文件（不在文件中输出完整密码）
-    cat > "$config_file" << PROXYEOF
-#!/bin/bash
-# SOCKS5 代理配置 - 生成于 $(date '+%Y-%m-%d %H:%M:%S')
-# 此配置仅对当前终端会话有效
-# 警告: 使用后请删除此文件 (rm $config_file)
-
-export http_proxy="${proxy_url}"
-export https_proxy="${proxy_url}"
-export all_proxy="${proxy_url}"
-
-echo "SOCKS5 代理已启用："
-echo "  服务器: ${proxy_ip}:${proxy_port}"
-echo "  用户: ${proxy_user:-无}"
-echo "  (代理 URL 已设置到环境变量)"
-PROXYEOF
-
-    # 恢复 umask 并确保文件权限安全
-    umask "$old_umask"
-    chmod 600 "$config_file"
-    
-    echo ""
-    echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
-    echo -e "${gl_lv}✅ 代理配置文件已生成！${gl_bai}"
-    echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
-    echo ""
-    echo -e "${gl_huang}使用方法：${gl_bai}"
-    echo ""
-    echo -e "1. ${gl_lv}应用代理配置：${gl_bai}"
-    echo "   source ${config_file}"
-    echo ""
-    echo -e "2. ${gl_lv}测试代理是否生效：${gl_bai}"
-    echo "   curl ip.sb"
-    echo "   （应该显示代理服务器的IP地址）"
-    echo ""
-    echo -e "3. ${gl_lv}取消代理：${gl_bai}"
-    echo "   unset http_proxy https_proxy all_proxy"
-    echo ""
-    echo -e "${gl_zi}注意事项：${gl_bai}"
-    echo "  - 此配置仅对执行 source 命令的终端会话有效"
-    echo "  - 关闭终端或重启系统后代理自动失效"
-    echo "  - 配置文件保存在 /tmp 目录，重启后会被清除"
-    echo ""
-    echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
-    echo ""
-    
     break_end
 }
 
@@ -3103,104 +2753,6 @@ sysctl_apply_validated() {
 }
 
 #=============================================================================
-# SWAP智能检测和建议函数（集成到选项2/3）
-#=============================================================================
-check_and_suggest_swap() {
-    local mem_total=$(free -m | awk 'NR==2{print $2}')
-    local swap_total=$(free -m | awk 'NR==3{print $2}')
-    local recommended_swap
-    local need_swap=0
-    
-    # 判断是否需要SWAP
-    if [ "$mem_total" -lt 2048 ]; then
-        # 小于2GB内存，强烈建议配置SWAP
-        need_swap=1
-    elif [ "$mem_total" -lt 4096 ] && [ "$swap_total" -eq 0 ]; then
-        # 2-4GB内存且没有SWAP，建议配置
-        need_swap=1
-    fi
-    
-    # 如果不需要SWAP，直接返回
-    if [ "$need_swap" -eq 0 ]; then
-        return 0
-    fi
-    
-    # 计算推荐的SWAP大小
-    if [ "$mem_total" -lt 512 ]; then
-        recommended_swap=1024
-    elif [ "$mem_total" -lt 1024 ]; then
-        recommended_swap=$((mem_total * 2))
-    elif [ "$mem_total" -lt 2048 ]; then
-        recommended_swap=$((mem_total * 3 / 2))
-    elif [ "$mem_total" -lt 4096 ]; then
-        recommended_swap=$mem_total
-    else
-        recommended_swap=4096
-    fi
-    
-    # 显示建议信息
-    echo ""
-    echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
-    echo -e "${gl_huang}检测到虚拟内存（SWAP）需要优化${gl_bai}"
-    echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
-    echo ""
-    echo -e "  物理内存:       ${gl_huang}${mem_total}MB${gl_bai}"
-    echo -e "  当前 SWAP:      ${gl_huang}${swap_total}MB${gl_bai}"
-    echo -e "  推荐 SWAP:      ${gl_lv}${recommended_swap}MB${gl_bai}"
-    echo ""
-    
-    if [ "$mem_total" -lt 1024 ]; then
-        echo -e "${gl_zi}原因: 小内存机器（<1GB）强烈建议配置SWAP，避免内存不足导致程序崩溃${gl_bai}"
-    elif [ "$mem_total" -lt 2048 ]; then
-        echo -e "${gl_zi}原因: 1-2GB内存建议配置SWAP，提供缓冲空间${gl_bai}"
-    elif [ "$mem_total" -lt 4096 ]; then
-        echo -e "${gl_zi}原因: 2-4GB内存建议配置少量SWAP作为保险${gl_bai}"
-    fi
-    
-    echo ""
-    echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
-    echo ""
-    
-    # 询问用户
-    if [ "$AUTO_MODE" = "1" ]; then
-        confirm=Y
-    else
-        read -e -p "$(echo -e "${gl_huang}是否现在配置虚拟内存？(Y/N): ${gl_bai}")" confirm
-    fi
-
-    case "$confirm" in
-        [Yy])
-            echo ""
-            echo -e "${gl_lv}开始配置虚拟内存...${gl_bai}"
-            echo ""
-            add_swap "$recommended_swap"
-            echo ""
-            echo -e "${gl_lv}✅ 虚拟内存配置完成！${gl_bai}"
-            echo ""
-            echo -e "${gl_zi}继续执行 BBR 优化配置...${gl_bai}"
-            sleep 2
-            return 0
-            ;;
-        [Nn])
-            echo ""
-            echo -e "${gl_huang}已跳过虚拟内存配置${gl_bai}"
-            echo -e "${gl_zi}继续执行 BBR 优化配置...${gl_bai}"
-            echo ""
-            sleep 2
-            return 1
-            ;;
-        *)
-            echo ""
-            echo -e "${gl_huang}输入无效，已跳过虚拟内存配置${gl_bai}"
-            echo -e "${gl_zi}继续执行 BBR 优化配置...${gl_bai}"
-            echo ""
-            sleep 2
-            return 1
-            ;;
-    esac
-}
-
-#=============================================================================
 # 配置冲突检测与清理（避免被其他 sysctl 覆盖）
 #=============================================================================
 check_and_clean_conflicts() {
@@ -3394,13 +2946,9 @@ bbr_configure_direct() {
     echo -e "${gl_kjlan}=== 配置 BBR v3 + FQ 直连/落地优化（智能检测版） ===${gl_bai}"
     echo ""
     
-    # 步骤 0：SWAP智能检测和建议
-    echo -e "${gl_zi}[步骤 1/6] 检测虚拟内存（SWAP）配置...${gl_bai}"
-    check_and_suggest_swap
-    
-    # 步骤 0.5：带宽检测和缓冲区计算
+    # 步骤 1：带宽检测和缓冲区计算
     echo ""
-    echo -e "${gl_zi}[步骤 2/6] 检测服务器带宽并计算最优缓冲区...${gl_bai}"
+    echo -e "${gl_zi}[步骤 1/5] 检测服务器带宽并计算最优缓冲区...${gl_bai}"
 
     local detected_bandwidth=$(detect_bandwidth)
 
@@ -3435,7 +2983,7 @@ bbr_configure_direct() {
     sleep 2
     
     echo ""
-    echo -e "${gl_zi}[步骤 3/6] 清理配置冲突...${gl_bai}"
+    echo -e "${gl_zi}[步骤 2/5] 清理配置冲突...${gl_bai}"
     echo "正在检查配置冲突..."
     
     # 备份主配置文件（如果还没备份）
@@ -3459,12 +3007,12 @@ bbr_configure_direct() {
     # 检查并清理可能覆盖的新旧配置冲突
     check_and_clean_conflicts
 
-    # 步骤 3：创建独立配置文件（使用动态缓冲区）
+    # 步骤 2：创建独立配置文件（使用动态缓冲区）
     echo ""
-    echo -e "${gl_zi}[步骤 4/6] 创建配置文件...${gl_bai}"
+    echo -e "${gl_zi}[步骤 3/5] 创建配置文件...${gl_bai}"
     echo "正在创建新配置..."
     
-    # 根据物理内存调整虚拟内存参数（mem_total 已在步骤 2 取得）
+    # 根据物理内存调整虚拟内存参数（mem_total 已在步骤 1 取得）
     local vm_swappiness=5
     local vm_dirty_ratio=15
     local vm_min_free_kbytes=65536
@@ -3576,9 +3124,9 @@ EOF
     # /etc/sysctl.conf 中与本配置同名的参数全部注释（sysctl --system 最后加载它，会盖掉本配置）
     comment_sysctl_conf_duplicates "$SYSCTL_CONF"
 
-    # 步骤 4：应用配置
+    # 步骤 3：应用配置
     echo ""
-    echo -e "${gl_zi}[步骤 5/6] 应用所有优化参数...${gl_bai}"
+    echo -e "${gl_zi}[步骤 4/5] 应用所有优化参数...${gl_bai}"
     echo "正在应用配置..."
     local sysctl_rejected
     sysctl_rejected=$(sysctl_apply_validated "$SYSCTL_CONF")
@@ -3757,9 +3305,9 @@ LIMITSEOF
         echo -e "${gl_zi}ℹ 单核 CPU，跳过 RPS/RFS（单核无需分担）${gl_bai}"
     fi
 
-    # 步骤 5：验证配置是否真正生效
+    # 步骤 4：验证配置是否真正生效
     echo ""
-    echo -e "${gl_zi}[步骤 6/6] 验证配置...${gl_bai}"
+    echo -e "${gl_zi}[步骤 5/5] 验证配置...${gl_bai}"
     
     local actual_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
     local actual_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
@@ -4112,7 +3660,6 @@ install_xanmod_kernel() {
 
     # 环境准备
     check_disk_space 3 || return 1
-    check_swap
     install_package wget gnupg || { echo -e "${gl_hong}错误: 无法安装必要依赖 wget/gnupg${gl_bai}"; return 1; }
 
     # 添加 XanMod GPG 密钥（分步执行，避免管道 $? 只检查最后一条命令）
@@ -4237,244 +3784,6 @@ install_xanmod_kernel() {
     echo -e "${gl_lv}已自动清理 XanMod 软件源（如需更新可再次运行选项1）${gl_bai}"
 
     return 0
-}
-
-
-#=============================================================================
-# IP地址获取函数
-#=============================================================================
-
-ip_address() {
-    local public_ip=""
-    local candidate=""
-    local external_api_success=false
-    local last_curl_status=0
-    local external_api_notice=""
-
-    if candidate=$(curl -4 -fsS --max-time 2 https://ipinfo.io/ip 2>/dev/null); then
-        candidate=$(echo "$candidate" | tr -d '\r\n')
-        if [ -n "$candidate" ]; then
-            public_ip="$candidate"
-            external_api_success=true
-        fi
-    else
-        last_curl_status=$?
-    fi
-
-    if [ "$external_api_success" = false ]; then
-        if candidate=$(curl -4 -fsS --max-time 2 https://api.ip.sb/ip 2>/dev/null); then
-            candidate=$(echo "$candidate" | tr -d '\r\n')
-            if [ -n "$candidate" ]; then
-                public_ip="$candidate"
-                external_api_success=true
-            fi
-        else
-            last_curl_status=$?
-        fi
-    fi
-
-    if [ "$external_api_success" = false ]; then
-        if candidate=$(curl -4 -fsS --max-time 2 https://ifconfig.me/ip 2>/dev/null); then
-            candidate=$(echo "$candidate" | tr -d '\r\n')
-            if [ -n "$candidate" ]; then
-                public_ip="$candidate"
-                external_api_success=true
-            fi
-        else
-            last_curl_status=$?
-        fi
-    fi
-
-    if [ "$external_api_success" = false ]; then
-        public_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')
-    fi
-
-    if [ -z "$public_ip" ]; then
-        public_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    fi
-
-    if [ -z "$public_ip" ]; then
-        public_ip="外部接口不可达"
-    fi
-
-    if [ "$external_api_success" = false ]; then
-        external_api_notice="外部接口不可达"
-        if [ "$last_curl_status" -ne 0 ]; then
-            external_api_notice+=" (curl 返回码 $last_curl_status)"
-        fi
-    fi
-
-    local local_ipv4=""
-    local_ipv4=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')
-    if [ -z "$local_ipv4" ]; then
-        local_ipv4=$(hostname -I 2>/dev/null | awk '{print $1}')
-    fi
-    if [ -z "$local_ipv4" ]; then
-        local_ipv4="外部接口不可达"
-    fi
-
-    if ! isp_info=$(curl -fsS --max-time 2 http://ipinfo.io/org 2>/dev/null); then
-        isp_info=""
-    else
-        isp_info=$(echo "$isp_info" | tr -d '\r\n')
-    fi
-
-    if [ -z "$isp_info" ] && [ -n "$external_api_notice" ]; then
-        isp_info="$external_api_notice"
-    fi
-
-    if echo "$isp_info" | grep -Eiq 'mobile|unicom|telecom'; then
-        ipv4_address="$local_ipv4"
-    else
-        ipv4_address="$public_ip"
-    fi
-
-    if [ -z "$ipv4_address" ]; then
-        ipv4_address="$local_ipv4"
-    fi
-
-    if ! ipv6_address=$(curl -fsS --max-time 2 https://v6.ipinfo.io/ip 2>/dev/null); then
-        ipv6_address=""
-    else
-        ipv6_address=$(echo "$ipv6_address" | tr -d '\r\n')
-    fi
-
-    if [ -n "$external_api_notice" ] && [ -z "$isp_info" ]; then
-        isp_info="$external_api_notice"
-    fi
-
-    if [ -z "$isp_info" ]; then
-        isp_info="未获取到运营商信息"
-    fi
-}
-#=============================================================================
-# 网络流量统计函数
-#=============================================================================
-
-output_status() {
-    output=$(awk 'BEGIN { rx_total = 0; tx_total = 0 }
-        $1 ~ /^(eth|ens|enp|eno)[0-9]+/ {
-            rx_total += $2
-            tx_total += $10
-        }
-        END {
-            rx_units = "Bytes";
-            tx_units = "Bytes";
-            if (rx_total > 1024) { rx_total /= 1024; rx_units = "K"; }
-            if (rx_total > 1024) { rx_total /= 1024; rx_units = "M"; }
-            if (rx_total > 1024) { rx_total /= 1024; rx_units = "G"; }
-
-            if (tx_total > 1024) { tx_total /= 1024; tx_units = "K"; }
-            if (tx_total > 1024) { tx_total /= 1024; tx_units = "M"; }
-            if (tx_total > 1024) { tx_total /= 1024; tx_units = "G"; }
-
-            printf("%.2f%s %.2f%s\n", rx_total, rx_units, tx_total, tx_units);
-        }' /proc/net/dev)
-
-    rx=$(echo "$output" | awk '{print $1}')
-    tx=$(echo "$output" | awk '{print $2}')
-}
-
-#=============================================================================
-# 时区获取函数
-#=============================================================================
-
-current_timezone() {
-    if grep -q 'Alpine' /etc/issue 2>/dev/null; then
-        date +"%Z %z"
-    else
-        timedatectl | grep "Time zone" | awk '{print $3}'
-    fi
-}
-
-#=============================================================================
-# 详细系统信息显示
-#=============================================================================
-
-show_detailed_status() {
-    clear
-
-    ip_address
-
-    local cpu_info=$(lscpu | awk -F': +' '/Model name:/ {print $2; exit}')
-
-    local cpu_usage_percent=$(awk '{u=$2+$4; t=$2+$4+$5; if (NR==1){u1=u; t1=t;} else printf "%.0f\n", (($2+$4-u1) * 100 / (t-t1))}' \
-        <(grep 'cpu ' /proc/stat) <(sleep 1; grep 'cpu ' /proc/stat))
-
-    local cpu_cores=$(nproc)
-
-    local cpu_freq=$(cat /proc/cpuinfo | grep "MHz" | head -n 1 | awk '{printf "%.1f GHz\n", $4/1000}')
-
-    local mem_info=$(free -b | awk 'NR==2{printf "%.2f/%.2fM (%.2f%%)", $3/1024/1024, $2/1024/1024, $3*100/$2}')
-
-    local disk_info=$(df -h | awk '$NF=="/"{printf "%s/%s (%s)", $3, $2, $5}')
-
-    local ipinfo=$(curl -s ipinfo.io)
-    local country=$(echo "$ipinfo" | grep 'country' | awk -F': ' '{print $2}' | tr -d '",')
-    local city=$(echo "$ipinfo" | grep 'city' | awk -F': ' '{print $2}' | tr -d '",')
-    local isp_info=$(echo "$ipinfo" | grep 'org' | awk -F': ' '{print $2}' | tr -d '",')
-
-    local load=$(uptime | awk '{print $(NF-2), $(NF-1), $NF}')
-    local dns_addresses=$(awk '/^nameserver/{printf "%s ", $2} END {print ""}' /etc/resolv.conf)
-
-    local cpu_arch=$(uname -m)
-    local hostname=$(uname -n)
-    local kernel_version=$(uname -r)
-
-    local congestion_algorithm=$(sysctl -n net.ipv4.tcp_congestion_control)
-    local queue_algorithm=$(sysctl -n net.core.default_qdisc)
-
-    local os_info=$(grep PRETTY_NAME /etc/os-release | cut -d '=' -f2 | tr -d '"')
-
-    output_status
-
-    local current_time=$(date "+%Y-%m-%d %I:%M %p")
-
-    local swap_info=$(free -m | awk 'NR==3{used=$3; total=$2; if (total == 0) {percentage=0} else {percentage=used*100/total}; printf "%dM/%dM (%d%%)", used, total, percentage}')
-
-    local runtime=$(cat /proc/uptime | awk -F. '{run_days=int($1 / 86400);run_hours=int(($1 % 86400) / 3600);run_minutes=int(($1 % 3600) / 60); if (run_days > 0) printf("%d天 ", run_days); if (run_hours > 0) printf("%d时 ", run_hours); printf("%d分\n", run_minutes)}')
-
-    local timezone=$(current_timezone)
-
-    echo ""
-    echo -e "系统信息查询"
-    echo -e "${gl_kjlan}-------------"
-    echo -e "${gl_kjlan}主机名:       ${gl_bai}$hostname"
-    echo -e "${gl_kjlan}系统版本:     ${gl_bai}$os_info"
-    echo -e "${gl_kjlan}Linux版本:    ${gl_bai}$kernel_version"
-    echo -e "${gl_kjlan}-------------"
-    echo -e "${gl_kjlan}CPU架构:      ${gl_bai}$cpu_arch"
-    echo -e "${gl_kjlan}CPU型号:      ${gl_bai}$cpu_info"
-    echo -e "${gl_kjlan}CPU核心数:    ${gl_bai}$cpu_cores"
-    echo -e "${gl_kjlan}CPU频率:      ${gl_bai}$cpu_freq"
-    echo -e "${gl_kjlan}-------------"
-    echo -e "${gl_kjlan}CPU占用:      ${gl_bai}$cpu_usage_percent%"
-    echo -e "${gl_kjlan}系统负载:     ${gl_bai}$load"
-    echo -e "${gl_kjlan}物理内存:     ${gl_bai}$mem_info"
-    echo -e "${gl_kjlan}虚拟内存:     ${gl_bai}$swap_info"
-    echo -e "${gl_kjlan}硬盘占用:     ${gl_bai}$disk_info"
-    echo -e "${gl_kjlan}-------------"
-    echo -e "${gl_kjlan}总接收:       ${gl_bai}$rx"
-    echo -e "${gl_kjlan}总发送:       ${gl_bai}$tx"
-    echo -e "${gl_kjlan}-------------"
-    echo -e "${gl_kjlan}网络算法:     ${gl_bai}$congestion_algorithm $queue_algorithm"
-    echo -e "${gl_kjlan}-------------"
-    echo -e "${gl_kjlan}运营商:       ${gl_bai}$isp_info"
-    if [ -n "$ipv4_address" ]; then
-        echo -e "${gl_kjlan}IPv4地址:     ${gl_bai}$ipv4_address"
-    fi
-
-    if [ -n "$ipv6_address" ]; then
-        echo -e "${gl_kjlan}IPv6地址:     ${gl_bai}$ipv6_address"
-    fi
-    echo -e "${gl_kjlan}DNS地址:      ${gl_bai}$dns_addresses"
-    echo -e "${gl_kjlan}地理位置:     ${gl_bai}$country $city"
-    echo -e "${gl_kjlan}系统时间:     ${gl_bai}$timezone $current_time"
-    echo -e "${gl_kjlan}-------------"
-    echo -e "${gl_kjlan}运行时长:     ${gl_bai}$runtime"
-    echo
-
-    break_end
 }
 
 #=============================================================================
@@ -6495,15 +5804,15 @@ show_main_menu() {
     echo -e "${gl_kjlan}━━━━━━━━━━━ 系统配置 ━━━━━━━━━━━${gl_bai}"
     echo "7. 设置IPv4/IPv6优先级"
     echo "8. IPv6管理（临时/永久禁用/取消）"
-    echo "9. 设置临时SOCKS5代理"
-    echo "10. 虚拟内存管理"
-    echo "11. 查看系统详细状态"
     echo ""
     echo -e "${gl_kjlan}━━━━━━━━━━ 代理部署 ━━━━━━━━━━${gl_bai}"
-    echo "12. 一键反代 ⭐ 推荐"
+    echo "9. 一键反代 ⭐ 推荐"
     echo ""
     echo -e "${gl_kjlan}━━━━━━━━━ 一键优化 ━━━━━━━━━${gl_bai}"
     echo "66. ⭐ 一键全自动优化 (BBR v3 + 网络调优)"
+    echo ""
+    echo -e "${gl_kjlan}━━━━━━━━━ 脚本维护 ━━━━━━━━━${gl_bai}"
+    echo "98. 更新脚本（从 GitHub 拉取最新版）"
     echo ""
     echo -e "${gl_hong}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
     echo -e "${gl_hong}99. 完全卸载脚本（卸载所有内容）${gl_bai}"
@@ -6555,19 +5864,13 @@ show_main_menu() {
             manage_ipv6
             ;;
         9)
-            set_temp_socks5_proxy
-            ;;
-        10)
-            manage_swap
-            ;;
-        11)
-            show_detailed_status
-            ;;
-        12)
             manage_reverse_proxy
             ;;
         66)
             one_click_optimize
+            ;;
+        98)
+            update_script_self
             ;;
         99)
             uninstall_all
@@ -6873,7 +6176,8 @@ strip_bbr_alias_blocks() {
     function is_project_alias(line,    body) {
         body = strip_unquoted_comment(line)
         return body ~ /^[[:space:]]*alias[[:space:]]+(bbr|dog)=/ &&
-               body ~ /(raw\.githubusercontent\.com|github\.com)\/Eric86777\/vps-tcp-tune\// &&
+               (body ~ /(raw\.githubusercontent\.com|github\.com)\/(Eric86777\/vps-tcp-tune|flyto23\/bbr)\// ||
+                body ~ /\/net-tcp-tune\.sh/) &&
                body ~ /net-tcp-tune\.sh/
     }
     function is_managed_comment(line) {
@@ -6881,7 +6185,9 @@ strip_bbr_alias_blocks() {
                line ~ /^# <<< net-tcp-tune alias <<</ ||
                line ~ /^# =+$/ ||
                line ~ /net-tcp-tune[[:space:]]+快捷别名/ ||
-               line ~ /使用.*时间戳参数确保每次都获取最新版本/
+               line ~ /使用.*时间戳参数确保每次都获取最新版本/ ||
+               line ~ /运行本地副本/ ||
+               line ~ /每次运行自动从/
     }
     function is_end_marker(line) {
         return line ~ /^# <<< net-tcp-tune alias <<</
@@ -6951,7 +6257,8 @@ rc_file_has_bbr_alias() {
     function is_project_alias(line,    body) {
         body = strip_unquoted_comment(line)
         return body ~ /^[[:space:]]*alias[[:space:]]+(bbr|dog)=/ &&
-               body ~ /(raw\.githubusercontent\.com|github\.com)\/Eric86777\/vps-tcp-tune\// &&
+               (body ~ /(raw\.githubusercontent\.com|github\.com)\/(Eric86777\/vps-tcp-tune|flyto23\/bbr)\// ||
+                body ~ /\/net-tcp-tune\.sh/) &&
                body ~ /net-tcp-tune\.sh/
     }
     is_project_alias($0) { found = 1; exit }
@@ -6985,6 +6292,164 @@ write_cleaned_rc_file() {
     return 0
 }
 
+#=============================================================================
+# 脚本在线更新（从 GitHub 仓库拉取最新版）
+#=============================================================================
+
+# 写入指向本地副本的 bbr 别名
+append_bbr_alias_block_local() {
+    cat <<ALIAS_EOF
+# >>> net-tcp-tune alias >>>
+# ========================================
+# net-tcp-tune 快捷别名 (自动添加)
+# 运行本地副本，更新请执行 bbr 菜单 98
+# ========================================
+alias bbr="bash ${SCRIPT_LOCAL_PATH}"
+# <<< net-tcp-tune alias <<<
+ALIAS_EOF
+}
+
+# 把已存在的 bbr 别名改写为本地副本
+ensure_local_bbr_alias() {
+    local rc_file temp_file rc found=0 changed=0
+    for rc_file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" "$HOME/.profile"; do
+        [ -f "$rc_file" ] || continue
+        rc_file_has_bbr_alias "$rc_file"
+        [ $? -eq 0 ] || continue
+        found=1
+        temp_file=$(mktemp "${rc_file}.tmp.XXXXXX") || continue
+        if ! strip_bbr_alias_blocks "$rc_file" > "$temp_file"; then
+            rm -f "$temp_file"
+            continue
+        fi
+        if [ -s "$temp_file" ] && [ "$(tail -c 1 "$temp_file" | wc -l | tr -d ' ')" -eq 0 ]; then
+            printf '\n' >> "$temp_file"
+        fi
+        append_bbr_alias_block_local >> "$temp_file"
+        write_cleaned_rc_file "$rc_file" "$temp_file"
+        rc=$?
+        rm -f "$temp_file"
+        [ "$rc" -eq 0 ] && changed=1
+    done
+    if [ "$found" -eq 0 ]; then
+        echo -e "  ${gl_huang}提示: 未找到 bbr 别名，可运行 install-alias.sh 安装${gl_bai}"
+    elif [ "$changed" -eq 1 ]; then
+        echo -e "  ${gl_lv}✅ bbr 别名已指向本地副本（source ~/.bashrc 或重新登录后生效）${gl_bai}"
+    fi
+}
+
+update_script_self() {
+    clear
+    echo -e "${gl_kjlan}=== 更新脚本 ===${gl_bai}"
+    echo ""
+    echo -e "仓库地址: ${gl_zi}${SCRIPT_REPO_URL}${gl_bai}"
+    echo -e "当前版本: ${gl_huang}v${SCRIPT_VERSION}${gl_bai} (${SCRIPT_LAST_UPDATE})"
+    echo -e "安装路径: ${gl_zi}${SCRIPT_LOCAL_PATH}${gl_bai}"
+    echo ""
+
+    if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+        echo -e "${gl_hong}❌ 未找到 curl 或 wget，无法在线更新${gl_bai}"
+        break_end
+        return 1
+    fi
+
+    local tmp_file url ok=0
+    tmp_file=$(mktemp /tmp/net-tcp-tune.update.XXXXXX) || {
+        echo -e "${gl_hong}❌ 无法创建临时文件${gl_bai}"
+        break_end
+        return 1
+    }
+    url="${SCRIPT_RAW_BASE}/net-tcp-tune.sh?$(date +%s)"
+
+    echo "正在从 GitHub 拉取最新版..."
+    if command -v curl &>/dev/null; then
+        curl -q -fsSL --connect-timeout 10 --max-time 180 "$url" -o "$tmp_file" && ok=1
+    fi
+    if [ "$ok" -ne 1 ] && command -v wget &>/dev/null; then
+        wget -q --timeout=30 --tries=2 -O "$tmp_file" "$url" && ok=1
+    fi
+    if [ "$ok" -ne 1 ] || [ ! -s "$tmp_file" ]; then
+        echo -e "${gl_hong}❌ 下载失败: ${url}${gl_bai}"
+        rm -f "$tmp_file"
+        break_end
+        return 1
+    fi
+
+    if ! verify_downloaded_script "$tmp_file" || ! grep -q '^SCRIPT_VERSION=' "$tmp_file" || ! grep -q 'net-tcp-tune' "$tmp_file"; then
+        echo -e "${gl_hong}❌ 下载内容校验失败（不是有效脚本），已取消，未修改任何文件${gl_bai}"
+        rm -f "$tmp_file"
+        break_end
+        return 1
+    fi
+    if ! bash -n "$tmp_file"; then
+        echo -e "${gl_hong}❌ 新脚本语法校验失败，已取消，未修改任何文件${gl_bai}"
+        rm -f "$tmp_file"
+        break_end
+        return 1
+    fi
+
+    local new_version new_update
+    new_version=$(sed -n 's/^SCRIPT_VERSION="\(.*\)"$/\1/p' "$tmp_file" | head -n 1)
+    new_update=$(sed -n 's/^SCRIPT_LAST_UPDATE="\(.*\)"$/\1/p' "$tmp_file" | head -n 1)
+    echo ""
+    echo -e "最新版本: ${gl_lv}v${new_version}${gl_bai} (${new_update})"
+    if [ "$new_version" = "$SCRIPT_VERSION" ]; then
+        echo -e "${gl_huang}提示: 版本号与当前相同（可能已是最新，或仓库刚更新未改版本号）${gl_bai}"
+    fi
+    echo ""
+
+    local confirm_update
+    read -e -p "$(echo -e "${gl_huang}确认安装到 ${SCRIPT_LOCAL_PATH}？(Y/n): ${gl_bai}")" confirm_update
+    case "${confirm_update:-Y}" in
+        [Yy]) ;;
+        *)
+            echo "已取消"
+            rm -f "$tmp_file"
+            break_end
+            return 1
+            ;;
+    esac
+
+    local backup_file=""
+    if [ -f "$SCRIPT_LOCAL_PATH" ]; then
+        backup_file="${SCRIPT_LOCAL_PATH}.bak.$(date +%Y%m%d_%H%M%S)"
+        if ! cp -p "$SCRIPT_LOCAL_PATH" "$backup_file"; then
+            echo -e "${gl_hong}❌ 备份旧版本失败，已取消${gl_bai}"
+            rm -f "$tmp_file"
+            break_end
+            return 1
+        fi
+        echo -e "  已备份旧版本: ${backup_file}"
+    fi
+
+    if ! install -m 755 "$tmp_file" "$SCRIPT_LOCAL_PATH"; then
+        echo -e "${gl_hong}❌ 写入 ${SCRIPT_LOCAL_PATH} 失败${gl_bai}"
+        [ -n "$backup_file" ] && cp -p "$backup_file" "$SCRIPT_LOCAL_PATH" 2>/dev/null
+        rm -f "$tmp_file"
+        break_end
+        return 1
+    fi
+    rm -f "$tmp_file"
+    echo -e "${gl_lv}✅ 已更新: ${SCRIPT_LOCAL_PATH}${gl_bai}"
+
+    ensure_local_bbr_alias
+
+    echo ""
+    local run_now
+    read -e -p "$(echo -e "${gl_huang}是否立即运行新版本？(Y/n): ${gl_bai}")" run_now
+    case "${run_now:-Y}" in
+        [Yy])
+            echo ""
+            echo "正在启动新版本..."
+            exec bash "$SCRIPT_LOCAL_PATH"
+            ;;
+        *)
+            echo "稍后运行 bbr 即可使用新版本"
+            ;;
+    esac
+    break_end
+}
+
 # 完全卸载脚本所有内容
 uninstall_all() {
     clear
@@ -6996,6 +6461,7 @@ uninstall_all() {
     echo ""
     echo "  • XanMod 内核（如果已安装）"
     echo "  • bbr 快捷别名"
+    echo "  • 本地脚本副本（${SCRIPT_LOCAL_PATH}）"
     echo "  • 所有 BBR/网络优化配置"
     echo "  • 所有 sysctl 配置文件"
     echo "  • MTU优化和持久化服务"
@@ -7269,6 +6735,17 @@ uninstall_all() {
             rm -f "$tmp_file" 2>/dev/null
             temp_cleaned=$((temp_cleaned + 1))
         fi
+    done
+
+    # 本地安装副本（菜单 98 更新到本地的脚本）
+    if [ -f "$SCRIPT_LOCAL_PATH" ]; then
+        rm -f "$SCRIPT_LOCAL_PATH" 2>/dev/null
+        temp_cleaned=$((temp_cleaned + 1))
+    fi
+    for tmp_file in "${SCRIPT_LOCAL_PATH}.bak."*; do
+        [ -f "$tmp_file" ] || continue
+        rm -f "$tmp_file" 2>/dev/null
+        temp_cleaned=$((temp_cleaned + 1))
     done
 
     # 备份目录（显式处理，不走 glob）

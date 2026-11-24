@@ -1,7 +1,7 @@
 #!/bin/bash
 #=============================================================================
 # 脚本名称: install-alias.sh
-# 功能描述: 为 net-tcp-tune 脚本创建/卸载快捷别名
+# 功能描述: 安装/卸载 net-tcp-tune 脚本及 bbr 快捷命令
 # 使用方法: 
 #   安装: bash install-alias.sh [install]
 #   卸载: bash install-alias.sh uninstall
@@ -12,6 +12,12 @@ GREEN='\033[1;32m'
 CYAN='\033[1;36m'
 RED='\033[1;31m'
 NC='\033[0m' # No Color
+
+# 仓库与安装路径
+REPO_URL="https://github.com/flyto23/bbr"
+REPO_RAW="https://raw.githubusercontent.com/flyto23/bbr/refs/heads/main"
+SCRIPT_URL="${REPO_RAW}/net-tcp-tune.sh"
+SCRIPT_LOCAL_PATH="/usr/local/bin/net-tcp-tune.sh"
 
 # 检测操作模式（安装或卸载）
 MODE="${1:-install}"
@@ -51,6 +57,68 @@ detect_rc_file() {
 
 detect_rc_file
 
+# 下载最新脚本到本地，成功时设置 SCRIPT_LOCAL_PATH
+download_script_copy() {
+    local dest
+    if [ "$(id -u)" -eq 0 ] && [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+        dest="/usr/local/bin/net-tcp-tune.sh"
+    else
+        mkdir -p "$HOME/.local/bin" 2>/dev/null || return 1
+        [ -w "$HOME/.local/bin" ] || return 1
+        dest="$HOME/.local/bin/net-tcp-tune.sh"
+    fi
+
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        echo -e "${YELLOW}未找到 curl 或 wget，跳过脚本下载${NC}"
+        return 1
+    fi
+
+    local tmp
+    tmp=$(mktemp "${dest}.download.XXXXXX") || return 1
+
+    local downloaded=0
+    if command -v curl >/dev/null 2>&1; then
+        if curl -q -fsSL --connect-timeout 10 --max-time 180 "${SCRIPT_URL}?$(date +%s)" -o "$tmp"; then
+            downloaded=1
+        fi
+    fi
+    if [ "$downloaded" -ne 1 ] && command -v wget >/dev/null 2>&1; then
+        if wget -q --timeout=30 --tries=2 -O "$tmp" "${SCRIPT_URL}?$(date +%s)"; then
+            downloaded=1
+        fi
+    fi
+
+    if [ "$downloaded" -ne 1 ] || [ ! -s "$tmp" ]; then
+        rm -f "$tmp"
+        return 1
+    fi
+
+    # 校验下载内容，避免把错误页/半截文件装进去
+    local first_line
+    first_line=$(head -n 1 "$tmp" 2>/dev/null)
+    if ! printf '%s' "$first_line" | grep -q '^#!.*bash'; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if ! grep -q '^SCRIPT_VERSION=' "$tmp" 2>/dev/null || ! grep -q 'net-tcp-tune' "$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if ! bash -n "$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        return 1
+    fi
+
+    chmod 755 "$tmp" 2>/dev/null
+    if ! mv -f "$tmp" "$dest"; then
+        rm -f "$tmp"
+        return 1
+    fi
+
+    SCRIPT_LOCAL_PATH="$dest"
+    return 0
+}
+
 alias_block_exists() {
     if [ ! -r "$RC_FILE" ]; then
         echo -e "${RED}错误: 无法读取配置文件 ${RC_FILE}${NC}" >&2
@@ -87,7 +155,8 @@ alias_block_exists() {
     function is_project_alias(line,    body) {
         body = strip_unquoted_comment(line)
         return body ~ /^[[:space:]]*alias[[:space:]]+(bbr|dog)=/ &&
-               body ~ /(raw\.githubusercontent\.com|github\.com)\/Eric86777\/vps-tcp-tune\// &&
+               (body ~ /(raw\.githubusercontent\.com|github\.com)\/(Eric86777\/vps-tcp-tune|flyto23\/bbr)\// ||
+                body ~ /\/net-tcp-tune\.sh/) &&
                body ~ /net-tcp-tune\.sh/
     }
     is_project_alias($0) { found = 1; exit }
@@ -96,15 +165,24 @@ alias_block_exists() {
 }
 
 append_alias_block() {
-    cat <<'ALIAS_EOF'
-# >>> net-tcp-tune alias >>>
-# ========================================
-# net-tcp-tune 快捷别名 (自动添加)
-# 使用 -q 忽略本机 curlrc，并用时间戳参数确保每次都获取最新版本，避免缓存
-# ========================================
-alias bbr="bash <(curl -q -fsSL \"https://raw.githubusercontent.com/Eric86777/vps-tcp-tune/refs/heads/main/net-tcp-tune.sh?\$(date +%s)\")"
-# <<< net-tcp-tune alias <<<
-ALIAS_EOF
+    local alias_line note
+    if [ "${USE_LOCAL_SCRIPT:-0}" = "1" ]; then
+        note="运行本地副本，更新请执行 bbr 菜单 98"
+        alias_line='alias bbr="bash '"${SCRIPT_LOCAL_PATH}"'"'
+    else
+        note="每次运行自动从 ${REPO_URL} 获取最新版本"
+        alias_line='alias bbr="bash <(curl -q -fsSL \"'"${SCRIPT_URL}"'?\$(date +%s)\")"'
+    fi
+
+    {
+        echo '# >>> net-tcp-tune alias >>>'
+        echo '# ========================================'
+        echo '# net-tcp-tune 快捷别名 (自动添加)'
+        echo "# ${note}"
+        echo '# ========================================'
+        echo "$alias_line"
+        echo '# <<< net-tcp-tune alias <<<'
+    }
 }
 
 strip_alias_blocks() {
@@ -146,7 +224,8 @@ strip_alias_blocks() {
     function is_project_alias(line,    body) {
         body = strip_unquoted_comment(line)
         return body ~ /^[[:space:]]*alias[[:space:]]+(bbr|dog)=/ &&
-               body ~ /(raw\.githubusercontent\.com|github\.com)\/Eric86777\/vps-tcp-tune\// &&
+               (body ~ /(raw\.githubusercontent\.com|github\.com)\/(Eric86777\/vps-tcp-tune|flyto23\/bbr)\// ||
+                body ~ /\/net-tcp-tune\.sh/) &&
                body ~ /net-tcp-tune\.sh/
     }
     function is_managed_comment(line) {
@@ -154,7 +233,8 @@ strip_alias_blocks() {
                line ~ /^# <<< net-tcp-tune alias <<</ ||
                line ~ /^# =+$/ ||
                line ~ /net-tcp-tune[[:space:]]+快捷别名/ ||
-               line ~ /使用.*时间戳参数确保每次都获取最新版本/
+               line ~ /运行本地副本/ ||
+               line ~ /每次运行自动从/
     }
     function is_end_marker(line) {
         return line ~ /^# <<< net-tcp-tune alias <<</
@@ -270,6 +350,8 @@ uninstall_alias() {
         echo ""
         echo "或者关闭终端重新打开，卸载即生效。"
         echo ""
+        [ -f "$SCRIPT_LOCAL_PATH" ] && echo -e "${YELLOW}提示: 本地脚本仍在 ${SCRIPT_LOCAL_PATH}，如需删除请手动执行 rm -f${NC}"
+        echo ""
             ;;
         2)
             echo -e "${YELLOW}未找到需要删除的内容${NC}"
@@ -285,12 +367,26 @@ uninstall_alias() {
 
 # 安装功能
 install_alias() {
-    echo -e "${CYAN}=== 安装 net-tcp-tune 快捷别名 ===${NC}"
+    echo -e "${CYAN}=== 安装 net-tcp-tune 快捷命令 ===${NC}"
     echo ""
     echo -e "检测到 Shell: ${GREEN}${CURRENT_SHELL}${NC}"
     echo ""
     echo -e "配置文件: ${GREEN}${RC_FILE}${NC}"
+    echo -e "脚本仓库: ${GREEN}${REPO_URL}${NC}"
     echo ""
+
+    # 先下载脚本本体，别名指向本地副本（菜单 98 可更新）
+    local installed_version=""
+    if download_script_copy; then
+        USE_LOCAL_SCRIPT=1
+        installed_version=$(sed -n 's/^SCRIPT_VERSION="\(.*\)"$/\1/p' "$SCRIPT_LOCAL_PATH" 2>/dev/null | head -n 1)
+        echo -e "脚本已安装: ${GREEN}${SCRIPT_LOCAL_PATH}${NC} (v${installed_version:-unknown})"
+    else
+        USE_LOCAL_SCRIPT=0
+        echo -e "${YELLOW}⚠️  脚本下载失败，改用在线模式（每次运行从 GitHub 拉取最新版）${NC}"
+    fi
+    echo ""
+
     local had_alias=0
     alias_block_exists
     local exists_rc=$?
@@ -351,10 +447,14 @@ install_alias() {
     echo "3. 然后直接输入快捷命令："
     echo -e "   ${GREEN}bbr${NC}  (系统优化)"
     echo ""
+    echo -e "${CYAN}=== 更新方法 ===${NC}"
+    echo ""
+    echo -e "  运行 ${GREEN}bbr${NC} 后选择 ${GREEN}98. 更新脚本${NC} 即可从 GitHub 拉取最新版"
+    echo ""
     echo -e "${CYAN}=== 卸载方法 ===${NC}"
     echo ""
     echo "如需卸载别名，请运行："
-    echo -e "   ${YELLOW}bash install-alias.sh uninstall${NC}"
+    echo -e "   ${YELLOW}bash <(curl -q -fsSL ${REPO_RAW}/install-alias.sh) uninstall${NC}"
     echo ""
     echo -e "${CYAN}=== 现在就生效（执行以下命令）===${NC}"
     echo ""
