@@ -8,14 +8,14 @@
 # 1. 正式版本迭代时修改 SCRIPT_VERSION，并更新版本备注（保留最新5条）
 # 2. 临时热修/不发版时只修改 SCRIPT_LAST_UPDATE，用于快速识别脚本是否已更新
 #=============================================================================
+# v5.6.1 更新: 交互输入提示统一为小写 (y/n)，功能4清理MTU改为 y/n 确认，完全卸载不再要求输入 YES (by Eric86777)
 # v5.6.0 更新: 新增菜单 98「更新脚本」，从 flyto23/bbr 拉取最新版并安装到 /usr/local/bin；移除临时SOCKS5代理、虚拟内存管理、查看系统详细状态(原9-11)，一键反代改为 9 (by Eric86777)
 # v5.5.0 更新: 精简版：移除代理部署(原12-16)、IP/网络检测与第三方工具(原18-33)，仅保留内核/BBR优化/系统配置/一键反代/一键优化，菜单重新编号（一键优化保留 66 快捷入口） (by Eric86777)
 # v5.4.22 更新: 纯IPv6机器保护(一键优化跳过禁用IPv6、Realm修复保留原监听)；cloudflared安装先下载到临时文件验证后再替换；Caddy安装按CPU架构选择下载包并在临时目录验证后安装 (by Eric86777)
 # v5.4.21 更新: 修复旧版官方安装(无xray账号、服务以nobody运行、日志属nobody)的Xray卸载被“专用 xray 账号不存在”拦住 (by Eric86777)
-# v5.4.20 更新: 功能3提速与修复：tcp_notsent_lowat恢复内核默认(长距离起步提速)；缓冲区按内存封顶并设置tcp_mem；tcp_rmem起步值改回131072；内核不支持的参数自动注释；多队列网卡保留mq (by Eric86777)
 
-SCRIPT_VERSION="5.6.0"
-SCRIPT_LAST_UPDATE="新增在线更新，移除临时代理/虚拟内存/详细状态"
+SCRIPT_VERSION="5.6.1"
+SCRIPT_LAST_UPDATE="输入提示统一小写 (y/n)"
 #=============================================================================
 
 #=============================================================================
@@ -419,7 +419,7 @@ check_disk_space() {
     if [ "$available_space_mb" -lt "$required_space_mb" ]; then
         echo -e "${gl_huang}警告: ${gl_bai}磁盘空间不足！"
         echo "当前可用: $((available_space_mb/1024))G | 最低需求: ${required_gb}G"
-        read -e -p "是否继续？(Y/N): " continue_choice
+        read -e -p "是否继续？(y/n): " continue_choice
         case "$continue_choice" in
             [Yy]) return 0 ;;
             *) return 1 ;;
@@ -583,7 +583,7 @@ restore_gai_conf() {
             ls -lh /etc/gai.conf.bak.* 2>/dev/null
             echo ""
             echo "是否要手动恢复最新的备份？[y/n]"
-            read -p "请选择: " manual_restore
+            read -p "请选择 (y/n): " manual_restore
             if [[ "$manual_restore" == "y" || "$manual_restore" == "Y" ]]; then
                 latest_backup=$(ls -t /etc/gai.conf.bak.* 2>/dev/null | head -1)
                 if [ -n "$latest_backup" ]; then
@@ -595,7 +595,7 @@ restore_gai_conf() {
             echo "也未找到任何备份文件。"
             echo ""
             echo "是否要删除当前的 gai.conf 文件（恢复到系统默认）？[y/n]"
-            read -p "请选择: " delete_conf
+            read -p "请选择 (y/n): " delete_conf
             if [[ "$delete_conf" == "y" || "$delete_conf" == "Y" ]]; then
                 rm -f /etc/gai.conf
                 echo -e "${gl_lv}✅ 已删除 gai.conf，系统将使用默认配置${gl_bai}"
@@ -610,7 +610,7 @@ restore_gai_conf() {
             echo "恢复操作将${gl_hong}删除${gl_bai}当前的 gai.conf 文件"
             echo ""
             echo "确认要恢复到原始状态吗？[y/n]"
-            read -p "请选择: " confirm
+            read -p "请选择 (y/n): " confirm
             
             if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
                 rm -f /etc/gai.conf
@@ -638,7 +638,7 @@ restore_gai_conf() {
                 echo "找到备份文件: $latest_backup"
                 echo ""
                 echo "确认要从备份恢复吗？[y/n]"
-                read -p "请选择: " confirm
+                read -p "请选择 (y/n): " confirm
                 
                 if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
                     cp "$latest_backup" /etc/gai.conf
@@ -1618,7 +1618,7 @@ disable_ipv6_temporary() {
     echo "------------------------------------------------"
     echo ""
     
-    read -e -p "$(echo -e "${gl_huang}确认临时禁用IPv6？(Y/N): ${gl_bai}")" confirm
+    read -e -p "$(echo -e "${gl_huang}确认临时禁用IPv6？(y/n): ${gl_bai}")" confirm
     
     case "$confirm" in
         [Yy])
@@ -1673,7 +1673,7 @@ disable_ipv6_permanent() {
         if [ "$AUTO_MODE" = "1" ]; then
             confirm=Y
         else
-            read -e -p "$(echo -e "${gl_huang}是否重新执行永久禁用？(Y/N): ${gl_bai}")" confirm
+            read -e -p "$(echo -e "${gl_huang}是否重新执行永久禁用？(y/n): ${gl_bai}")" confirm
         fi
 
         case "$confirm" in
@@ -1691,7 +1691,7 @@ disable_ipv6_permanent() {
     if [ "$AUTO_MODE" = "1" ]; then
         confirm=Y
     else
-        read -e -p "$(echo -e "${gl_huang}确认永久禁用IPv6？(Y/N): ${gl_bai}")" confirm
+        read -e -p "$(echo -e "${gl_huang}确认永久禁用IPv6？(y/n): ${gl_bai}")" confirm
     fi
 
     case "$confirm" in
@@ -1782,7 +1782,7 @@ cancel_ipv6_permanent_disable() {
         return 1
     fi
     
-    read -e -p "$(echo -e "${gl_huang}确认取消永久禁用并恢复原始状态？(Y/N): ${gl_bai}")" confirm
+    read -e -p "$(echo -e "${gl_huang}确认取消永久禁用并恢复原始状态？(y/n): ${gl_bai}")" confirm
     
     case "$confirm" in
         [Yy])
@@ -1980,7 +1980,7 @@ auto_cleanup_legacy_mtu() {
 
 
 server_reboot() {
-    read -e -p "$(echo -e "${gl_huang}提示: ${gl_bai}现在重启服务器使配置生效吗？(Y/N): ")" rboot
+    read -e -p "$(echo -e "${gl_huang}提示: ${gl_bai}现在重启服务器使配置生效吗？(y/n): ")" rboot
     case "$rboot" in
         [Yy])
             echo "正在重启..."
@@ -2144,8 +2144,8 @@ detect_bandwidth() {
                 echo "" >&2
                 
                 # 询问用户确认
-                read -e -p "是否使用默认值 1000 Mbps？(Y/N) [Y]: " use_default
-                use_default=${use_default:-Y}
+                read -e -p "是否使用默认值 1000 Mbps？(y/n) [y]: " use_default
+                use_default=${use_default:-y}
                 
                 case "$use_default" in
                     [Yy])
@@ -2251,8 +2251,8 @@ detect_bandwidth() {
             echo "" >&2
             
             # 询问是否现在查看服务器列表
-            read -e -p "是否现在查看附近的测速服务器列表？(Y/N) [Y]: " show_list
-            show_list=${show_list:-Y}
+            read -e -p "是否现在查看附近的测速服务器列表？(y/n) [y]: " show_list
+            show_list=${show_list:-y}
             
             if [[ "$show_list" =~ ^[Yy]$ ]]; then
                 echo "" >&2
@@ -2319,8 +2319,8 @@ detect_bandwidth() {
                 echo "  - 该服务器暂时不可用" >&2
                 echo "" >&2
                 
-                read -e -p "是否使用默认值 1000 Mbps？(Y/N) [Y]: " use_default
-                use_default=${use_default:-Y}
+                read -e -p "是否使用默认值 1000 Mbps？(y/n) [y]: " use_default
+                use_default=${use_default:-y}
                 
                 if [[ "$use_default" =~ ^[Yy]$ ]]; then
                     echo "" >&2
@@ -2627,8 +2627,8 @@ calculate_buffer_size() {
     if [ "$AUTO_MODE" = "1" ]; then
         confirm=Y
     else
-        read -e -p "$(echo -e "${gl_huang}是否使用推荐值 ${buffer_mb}MB？(Y/N) [Y]: ${gl_bai}")" confirm
-        confirm=${confirm:-Y}
+        read -e -p "$(echo -e "${gl_huang}是否使用推荐值 ${buffer_mb}MB？(y/n) [y]: ${gl_bai}")" confirm
+        confirm=${confirm:-y}
     fi
 
     case "$confirm" in
@@ -2794,7 +2794,7 @@ check_and_clean_conflicts() {
     if [ "$AUTO_MODE" = "1" ]; then
         ans=Y
     else
-        read -e -p "是否自动禁用/注释这些覆盖配置？(Y/N): " ans
+        read -e -p "是否自动禁用/注释这些覆盖配置？(y/n): " ans
     fi
     case "$ans" in
         [Yy])
@@ -3626,7 +3626,7 @@ install_xanmod_kernel() {
     echo "支持系统: Debian/Ubuntu x86_64（ARM64 请使用功能 3）"
     echo -e "${gl_huang}警告: 将升级 Linux 内核，请提前备份重要数据！${gl_bai}"
     echo "------------------------------------------------"
-    read -e -p "确定继续安装吗？(Y/N): " choice
+    read -e -p "确定继续安装吗？(y/n): " choice
 
     case "$choice" in
         [Yy])
@@ -5751,8 +5751,8 @@ one_click_optimize() {
         if ! has_ipv4_default_route; then
             echo -e "${gl_huang}检测到本机无 IPv4，已跳过禁用 IPv6（避免断开 SSH）${gl_bai}"
         else
-            read -e -p "$(echo -e "${gl_huang}是否永久禁用 IPv6？(Y/N) [Y]: ${gl_bai}")" ipv6_choice
-            ipv6_choice=${ipv6_choice:-Y}
+            read -e -p "$(echo -e "${gl_huang}是否永久禁用 IPv6？(y/n) [y]: ${gl_bai}")" ipv6_choice
+            ipv6_choice=${ipv6_choice:-y}
             if [[ "$ipv6_choice" =~ ^[Yy]$ ]]; then
                 AUTO_MODE=1
                 disable_ipv6_permanent
@@ -5845,9 +5845,11 @@ show_main_menu() {
         4)
             echo -e "${gl_huang}功能4仅用于清理旧版 MTU 残留，会恢复路由/链路 MTU。${gl_bai}"
             local mtu_cleanup_confirm
-            if read -r -p "输入 清理MTU 才执行，其他输入取消: " mtu_cleanup_confirm && [ "$mtu_cleanup_confirm" = "清理MTU" ]; then
-                auto_cleanup_legacy_mtu
-            fi
+            read -r -p "确认清理旧版 MTU 残留？(y/n): " mtu_cleanup_confirm
+            case "$mtu_cleanup_confirm" in
+                [Yy]) auto_cleanup_legacy_mtu ;;
+                *) echo -e "${gl_huang}已取消${gl_bai}" ;;
+            esac
             break_end
             ;;
         5)
@@ -6028,7 +6030,7 @@ update_xanmod_kernel() {
     echo "$upgradable"
     echo ""
     
-    read -e -p "确定更新 XanMod 内核吗？(Y/N): " confirm
+    read -e -p "确定更新 XanMod 内核吗？(y/n): " confirm
     
     case "$confirm" in
         [Yy])
@@ -6100,7 +6102,7 @@ uninstall_xanmod() {
     echo -e "${gl_lv}✅ 检测到 ${non_xanmod_kernels} 个回退内核，可以安全卸载${gl_bai}"
     echo ""
 
-    read -e -p "确定继续吗？(Y/N): " confirm
+    read -e -p "确定继续吗？(y/n): " confirm
 
     case "$confirm" in
         [Yy])
@@ -6399,8 +6401,8 @@ update_script_self() {
     echo ""
 
     local confirm_update
-    read -e -p "$(echo -e "${gl_huang}确认安装到 ${SCRIPT_LOCAL_PATH}？(Y/n): ${gl_bai}")" confirm_update
-    case "${confirm_update:-Y}" in
+    read -e -p "$(echo -e "${gl_huang}确认安装到 ${SCRIPT_LOCAL_PATH}？(y/n) [y]: ${gl_bai}")" confirm_update
+    case "${confirm_update:-y}" in
         [Yy]) ;;
         *)
             echo "已取消"
@@ -6436,8 +6438,8 @@ update_script_self() {
 
     echo ""
     local run_now
-    read -e -p "$(echo -e "${gl_huang}是否立即运行新版本？(Y/n): ${gl_bai}")" run_now
-    case "${run_now:-Y}" in
+    read -e -p "$(echo -e "${gl_huang}是否立即运行新版本？(y/n) [y]: ${gl_bai}")" run_now
+    case "${run_now:-y}" in
         [Yy])
             echo ""
             echo "正在启动新版本..."
@@ -6471,9 +6473,9 @@ uninstall_all() {
     echo -e "${gl_hong}此操作不可逆！${gl_bai}"
     echo ""
     
-    read -e -p "确定要完全卸载吗？(输入 YES 确认): " confirm
+    read -e -p "确定要完全卸载吗？(y/n): " confirm
     
-    if [ "$confirm" != "YES" ]; then
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo -e "${gl_huang}已取消卸载${gl_bai}"
         break_end
         return 1
@@ -6811,8 +6813,8 @@ uninstall_all() {
     # 询问是否重启
     if [ "$xanmod_removed" -eq 1 ]; then
         echo -e "${gl_huang}检测到已卸载内核，建议重启系统${gl_bai}"
-        read -e -p "是否立即重启？(Y/n): " reboot_confirm
-        case "${reboot_confirm:-Y}" in
+        read -e -p "是否立即重启？(y/n) [y]: " reboot_confirm
+        case "${reboot_confirm:-y}" in
             [Yy])
                 echo ""
                 echo -e "${gl_lv}✅ 完全卸载完成，正在重启系统...${gl_bai}"
@@ -7252,7 +7254,7 @@ cf_tunnel_add() {
     if ! command -v cloudflared &>/dev/null; then
         echo -e "  cloudflared: ${gl_huang}未安装${gl_bai}"
         local install_now
-        read -e -p "  是否现在自动安装?(Y/n): " install_now
+        read -e -p "  是否现在自动安装?(y/n) [y]: " install_now
         if [[ ! "$install_now" =~ ^[Nn]$ ]]; then
             cf_helper_install_binary || { break_end; return 1; }
         else
@@ -7316,7 +7318,7 @@ cf_tunnel_add() {
             else
                 echo -e "${gl_huang}  ⚠️  端口 $port 当前没有服务监听${gl_bai}"
                 local cont
-                read -e -p "  是否继续?(y/N): " cont
+                read -e -p "  是否继续?(y/n) [n]: " cont
                 [[ ! "$cont" =~ ^[Yy]$ ]] && continue
             fi
         elif [[ "$backend" =~ ^https?://.+ ]]; then
@@ -7370,7 +7372,7 @@ cf_tunnel_add() {
             echo -e "${gl_lv}  ✅ $rule_path → $rule_backend${gl_bai}"
             rule_num=$((rule_num + 1))
             local more
-            read -e -p "继续加一条?(y/N): " more
+            read -e -p "继续加一条?(y/n) [n]: " more
             [[ ! "$more" =~ ^[Yy]$ ]] && break
         done
         echo ""
@@ -7425,7 +7427,7 @@ cf_tunnel_add() {
     done
     echo ""
     local confirm
-    read -e -p "确认开始部署?(Y/n): " confirm
+    read -e -p "确认开始部署?(y/n) [y]: " confirm
     if [[ "$confirm" =~ ^[Nn]$ ]]; then
         echo "已取消"; break_end; return 1
     fi
