@@ -1,28 +1,14 @@
 # BBR v3 优化脚本 - Ultimate Edition v5.5.0
-
-**XanMod 内核 + BBR v3 + VPS 网络调优**
-
-一键安装 XanMod 内核，启用 BBR v3 拥塞控制，并提供 13 项内核/网络/系统配置功能，专注把 VPS 的 TCP 吞吐和稳定性调好。
-
-> **v5.5.0 精简版**：移除代理部署、检测测试与第三方工具类功能（原 12-16、18-33），只保留内核、BBR 优化、系统配置、一键反代与一键优化；菜单重新编号为 1-12，一键优化保留 66 快捷入口。
-
+XanMod 内核 + BBR v3 + VPS 网络调优
 ---
 
 ## 一键安装
-
-### 方式1：快捷别名（推荐）
-
-**如果是新机器（未安装 curl），请先手动执行：**
-
-```bash
-apt update -y && apt install curl -y
-```
 
 **安装脚本（安装后只需输入 `bbr` 即可运行）：**
 
 ```bash
 # 安装别名
-bash <(curl -q -fsSL "https://raw.githubusercontent.com/Eric86777/vps-tcp-tune/refs/heads/main/install-alias.sh?$(date +%s)")
+bash <(curl -q -fsSL "https://raw.githubusercontent.com/flyto23/bbr/main/install-alias.sh?$(date +%s)")
 
 # 重新加载配置
 source ~/.bashrc  # 或 source ~/.zshrc
@@ -31,32 +17,6 @@ source ~/.bashrc  # 或 source ~/.zshrc
 bbr
 ```
 
-**优势**：
-
-- 每次运行自动获取最新版本
-- 只需输入 3 个字符即可启动
-- 无需记忆复杂命令
-- 支持 bash 和 zsh
-
-<details>
-<summary>其他安装方式（点击展开）</summary>
-
-### 方式2：在线运行（临时使用）
-
-```bash
-# 推荐：使用 -q 忽略本机 curlrc，并用时间戳参数确保获取最新版本（无缓存）
-bash <(curl -q -fsSL "https://raw.githubusercontent.com/Eric86777/vps-tcp-tune/refs/heads/main/net-tcp-tune.sh?$(date +%s)")
-```
-
-### 方式3：下载到本地
-
-```bash
-wget -O net-tcp-tune.sh "https://raw.githubusercontent.com/Eric86777/vps-tcp-tune/refs/heads/main/net-tcp-tune.sh?$(date +%s)"
-chmod +x net-tcp-tune.sh
-./net-tcp-tune.sh
-```
-
-> 本地下载的脚本不会自动更新；需要新版时请重新执行上面的 `wget` 命令，或优先使用 `bbr` 快捷别名。
 
 </details>
 
@@ -183,57 +143,3 @@ chmod +x net-tcp-tune.sh
 4. 禁用 IPv6（可选；纯 IPv6 机器会自动跳过，避免断 SSH）
 
 ---
-
-## 常见问题
-
-**Q: 安装后运行 `bbr` 提示找不到命令？**
-
-A: 请执行 `source ~/.bashrc` 重新加载配置，或者断开 SSH 重连即可。
-
-**Q: 运行 `bbr` 提示 `curl: (22) The requested URL returned error: 401`？**
-
-A: 通常是该机器旧别名或本机 `~/.curlrc` 带了异常 Authorization。请重新安装别名：
-
-```bash
-unalias bbr 2>/dev/null || true
-unset -f bbr 2>/dev/null || true
-bash <(curl -q -fsSL "https://raw.githubusercontent.com/Eric86777/vps-tcp-tune/refs/heads/main/install-alias.sh?$(date +%s)")
-source ~/.bashrc
-```
-
-**Q: 我的 VPS 是 ARM64（aarch64），能装 BBR v3 吗？**
-
-A: 目前不能，这不是脚本的限制。BBR v3 至今未合入 Linux 主线内核，必须使用打过补丁重新编译的内核，而 XanMod 官方只提供 x86-64 构建，ARM 平台没有官方方案。**但 ARM 机器请直接使用功能 3**：ARM 内核自带 BBR + fq 队列算法，功能 3 的带宽检测与缓冲区调优在 ARM 上原生可用，同样能获得明显提升。功能 1 在 ARM 上会直接提示这一点。
-
-**Q: 开启 BBR v3 需要重启吗？**
-
-A: 是的，首次安装内核后必须重启服务器。后续修改参数（如功能 3）通常无需重启。
-
----
-
-## 进阶说明
-
-<details>
-<summary>开机启动恢复（点击展开）</summary>
-
-- 运行 `bbr` 时会识别本项目安装的 DNS 净化配置，自动补齐开机启动恢复；空机器浏览菜单、`--help`、`--version` 不会触发
-- 自动补齐不下载或升级程序、不更换内核、不重启机器或网卡，也不会拉起你手动停止的服务
-- 需要手动检查补齐时执行 `bbr --repair-boot-recovery`（本地文件：`bash net-tcp-tune.sh --repair-boot-recovery`）
-- 永久禁用 IPv6 前，若网卡配置（ifupdown）里仍有 `inet6`，脚本会拒绝执行，不会代改网卡配置
-- 首次部署或迁移后，建议检查服务日志并实际测试，进程显示 `active` 不代表业务一定正常
-
-</details>
-
----
-
-## 支持项目
-
-如果这个脚本对你有帮助，欢迎 Star！
-
-[![GitHub stars](https://img.shields.io/github/stars/Eric86777/vps-tcp-tune?style=social)](https://github.com/Eric86777/vps-tcp-tune)
-
-## Star History
-
-<a href="https://star-history.com/#Eric86777/vps-tcp-tune&Date">
-  <img src="https://api.star-history.com/svg?repos=Eric86777/vps-tcp-tune&type=Date" alt="Star History Chart" width="600">
-</a>
